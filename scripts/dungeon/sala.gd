@@ -4,13 +4,8 @@ extends Node3D
 signal sala_completada(sala: Sala)
 signal mob_registrado(mob: Mob)
 
-const ALTURA_PARED := 3.0
-const GROSOR_PARED := 0.6
 const ALTURA_HUECO_PUERTA := 2.0
 const ANCHO_HUECO_PUERTA := 2.0
-const COLOR_SUELO := Color("#555555")
-const COLOR_PARED := Color("#DDDDDD")
-const COLOR_TECHO := Color(1.0, 1.0, 1.0, 0.15)
 
 @export var tipo: String = "combate"
 @export var posicion_grid: Vector2i = Vector2i.ZERO
@@ -35,6 +30,7 @@ var _spawn_manager: Node = null
 var _minimap: Node = null
 var _oleadas_restantes: int = 0
 
+# Configura la identidad lógica de la sala, su coordenada de grilla y el tamaño base usado por spawns y bloqueadores al entrar al piso.
 func configurar(tipo_sala: String, grid_pos: Vector2i, piso_actual: int, tamano_base: float, usar_techo: bool) -> void:
 	tipo = tipo_sala
 	posicion_grid = grid_pos
@@ -44,13 +40,7 @@ func configurar(tipo_sala: String, grid_pos: Vector2i, piso_actual: int, tamano_
 	tamano_sala = _calcular_tamano_por_tipo()
 	name = "Sala_%s_%s" % [grid_pos.x, grid_pos.y]
 
-func construir_geometria() -> void:
-	_destruir_geometria_previa()
-	_crear_suelo()
-	_crear_paredes_con_huecos()
-	if mostrar_techo:
-		_crear_techo()
-
+# Marca la sala como visitada y dispara el flujo de combate/spawn cuando el jugador entra físicamente en esa coordenada del layout.
 func entrar_sala() -> void:
 	visitada = true
 	var jugadores := get_tree().get_nodes_in_group("player")
@@ -66,6 +56,7 @@ func entrar_sala() -> void:
 		if tipo == "combate" or tipo == "arena":
 			bloquear_puertas()
 
+# Completa la sala para desbloquear puertas, resolver recompensas de tesoro y sincronizar su estado con el minimapa lógico.
 func completar_sala() -> void:
 	if completada:
 		return
@@ -76,6 +67,7 @@ func completar_sala() -> void:
 	emit_signal("sala_completada", self)
 	_actualizar_minimapa()
 
+# Registra cada mob activo en esta coordenada para saber cuándo una oleada terminó y la sala puede considerarse despejada.
 func registrar_mob(mob: Mob) -> void:
 	if mob == null:
 		return
@@ -84,6 +76,7 @@ func registrar_mob(mob: Mob) -> void:
 		mob.mob_murio.connect(_on_mob_muerto)
 	emit_signal("mob_registrado", mob)
 
+# Activa todos los bloqueadores invisibles de puerta ya colocados en los lados conectados para impedir salir durante combates.
 func bloquear_puertas() -> void:
 	for blocker: StaticBody3D in _door_blockers.values():
 		blocker.process_mode = Node.PROCESS_MODE_INHERIT
@@ -91,6 +84,7 @@ func bloquear_puertas() -> void:
 			if child is CollisionShape3D:
 				child.disabled = false
 
+# Desactiva los bloqueadores invisibles de puerta para permitir el tránsito libre entre salas una vez completado el encuentro.
 func desbloquear_puertas() -> void:
 	for blocker: StaticBody3D in _door_blockers.values():
 		for child in blocker.get_children():
@@ -98,6 +92,7 @@ func desbloquear_puertas() -> void:
 				child.disabled = true
 		blocker.process_mode = Node.PROCESS_MODE_DISABLED
 
+# Atiende la muerte de un mob en esta sala para abrir puertas o lanzar la siguiente oleada cuando el contador de enemigos llega a cero.
 func _on_mob_muerto(mob_ref: Mob) -> void:
 	_mobs_activos.erase(mob_ref)
 	if not _mobs_activos.is_empty():
@@ -108,16 +103,17 @@ func _on_mob_muerto(mob_ref: Mob) -> void:
 	if tipo == "combate" or tipo == "arena" or tipo == "jefe":
 		completar_sala()
 
+# Localiza el minimapa global y refresca el color/estado de esta coordenada lógica sin tocar la representación 3D.
 func _actualizar_minimapa() -> void:
 	_minimap = get_node_or_null("/root/GeneradorPiso/MinimapPiso")
 	if _minimap != null:
 		_minimap.call("actualizar_sala", self)
 
+# Genera cofres de recompensa y una posible trampa en posiciones internas de la sala usando el mismo tamano_sala que el piso visual.
 func _spawnear_cofres() -> void:
 	var random := RandomNumberGenerator.new()
 	random.seed = hash([numero_piso, posicion_grid.x, posicion_grid.y, "tesoro"])
-	var cantidad := random.randi_range(1, 3)
-	for indice in cantidad:
+	for indice in random.randi_range(1, 3):
 		var cofre := CSGBox3D.new()
 		cofre.name = "Cofre_%s" % indice
 		cofre.size = Vector3(1.2, 1.0, 0.9)
@@ -141,6 +137,7 @@ func _spawnear_cofres() -> void:
 		trampa.material = material_trampa
 		add_child(trampa)
 
+# Calcula el tamaño lógico de uso interno de la sala para que mobs, cofres y puertas respeten la escala base de 20 unidades por celda.
 func _calcular_tamano_por_tipo() -> Vector2:
 	match tipo:
 		"arena":
@@ -152,66 +149,22 @@ func _calcular_tamano_por_tipo() -> Vector2:
 		_:
 			return Vector2(tamano_celda - 6.0, tamano_celda - 6.0)
 
-func _destruir_geometria_previa() -> void:
+# Rehace los bloqueadores invisibles de las puertas en las coordenadas cardinales de la sala para mantener la lógica de cierre sin CSG visibles.
+func reconstruir_bloqueadores_puertas() -> void:
+	_destruir_bloqueadores_previos()
+	for direccion: String in conexiones.keys():
+		if conexiones[direccion] != null:
+			_crear_bloqueador_puerta(direccion)
+	desbloquear_puertas()
+
+# Elimina bloqueadores de puertas antiguos de esta sala para no duplicar colisiones cuando se regenera el piso completo.
+func _destruir_bloqueadores_previos() -> void:
 	for child in get_children():
-		if child is CSGBox3D or child is StaticBody3D:
+		if child is StaticBody3D and child.name.begins_with("Bloqueo_"):
 			child.queue_free()
 	_door_blockers.clear()
 
-func _crear_suelo() -> void:
-	var suelo := CSGBox3D.new()
-	suelo.name = "Suelo"
-	suelo.size = Vector3(tamano_sala.x, 0.4, tamano_sala.y)
-	suelo.position = Vector3(0.0, -0.2, 0.0)
-	suelo.material = _crear_material(COLOR_SUELO)
-	add_child(suelo)
-
-func _crear_techo() -> void:
-	var techo := CSGBox3D.new()
-	techo.name = "Techo"
-	techo.size = Vector3(tamano_sala.x, 0.2, tamano_sala.y)
-	techo.position = Vector3(0.0, ALTURA_PARED + 0.1, 0.0)
-	techo.material = _crear_material(COLOR_TECHO, true)
-	add_child(techo)
-
-func _crear_paredes_con_huecos() -> void:
-	_crear_pared_lado("norte")
-	_crear_pared_lado("sur")
-	_crear_pared_lado("este")
-	_crear_pared_lado("oeste")
-
-func _crear_pared_lado(direccion: String) -> void:
-	var tiene_puerta := conexiones.get(direccion) != null
-	if not tiene_puerta:
-		_crear_segmento_pared(direccion, 0, _longitud_pared(direccion), ALTURA_PARED, false)
-		return
-
-	var longitud := _longitud_pared(direccion)
-	var mitad_hueco := ANCHO_HUECO_PUERTA * 0.5
-	var segmento_lateral : float= max((longitud - ANCHO_HUECO_PUERTA) * 0.5, 0.5)
-	_crear_segmento_pared(direccion, -(mitad_hueco + segmento_lateral * 0.5), segmento_lateral, ALTURA_PARED, false)
-	_crear_segmento_pared(direccion, mitad_hueco + segmento_lateral * 0.5, segmento_lateral, ALTURA_PARED, false)
-	_crear_segmento_pared(direccion, 0, ANCHO_HUECO_PUERTA, ALTURA_PARED - ALTURA_HUECO_PUERTA, true)
-	_crear_bloqueador_puerta(direccion)
-
-func _crear_segmento_pared(direccion: String, offset: float, longitud: float, altura: float, sobre_puerta: bool) -> void:
-	if longitud <= 0.0 or altura <= 0.0:
-		return
-	var pared := CSGBox3D.new()
-	pared.name = "Pared_%s_%s" % [direccion, abs(offset)]
-	var base_y := altura * 0.5
-	if sobre_puerta:
-		base_y = ALTURA_HUECO_PUERTA + altura * 0.5
-	match direccion:
-		"norte", "sur":
-			pared.size = Vector3(longitud, altura, GROSOR_PARED)
-			pared.position = Vector3(offset, base_y, _z_pared(direccion))
-		"este", "oeste":
-			pared.size = Vector3(GROSOR_PARED, altura, longitud)
-			pared.position = Vector3(_x_pared(direccion), base_y, offset)
-	pared.material = _crear_material(COLOR_PARED)
-	add_child(pared)
-
+# Crea un StaticBody3D en la coordenada del hueco cardinal para cerrar temporalmente esa salida cuando la sala está bloqueada.
 func _crear_bloqueador_puerta(direccion: String) -> void:
 	var cuerpo := StaticBody3D.new()
 	cuerpo.name = "Bloqueo_%s" % direccion
@@ -227,27 +180,19 @@ func _crear_bloqueador_puerta(direccion: String) -> void:
 	cuerpo.add_child(colision)
 	add_child(cuerpo)
 	_door_blockers[direccion] = cuerpo
-	desbloquear_puertas()
 
-func _longitud_pared(direccion: String) -> float:
-	return tamano_sala.x if direccion == "norte" or direccion == "sur" else tamano_sala.y
-
+# Calcula la coordenada Z del lado norte o sur para alinear bloqueadores de puerta con el borde jugable de la sala.
 func _z_pared(direccion: String) -> float:
 	return -tamano_sala.y * 0.5 if direccion == "norte" else tamano_sala.y * 0.5
 
+# Calcula la coordenada X del lado este u oeste para alinear bloqueadores de puerta con el borde jugable de la sala.
 func _x_pared(direccion: String) -> float:
 	return tamano_sala.x * 0.5 if direccion == "este" else -tamano_sala.x * 0.5
 
-func _crear_material(color: Color, transparente: bool = false) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	if transparente:
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	return material
-
+# Prepara el contador de oleadas para que las arenas sepan cuántos grupos faltan por resolver en esta coordenada.
 func preparar_oleadas(cantidad: int) -> void:
 	_oleadas_restantes = max(cantidad, 0)
 
+# Consume una oleada completada para acercar la arena al desbloqueo final cuando SpawnManager lanza otro grupo.
 func consumir_oleada() -> void:
 	_oleadas_restantes = max(_oleadas_restantes - 1, 0)
