@@ -2,15 +2,20 @@ class_name Player
 extends CharacterBody3D
 
 signal stat_cambiada(nombre: String, valor_nuevo: float)
+signal jugador_murio()
+signal recurso_cambiado(tipo: String, actual: float, maximo: float)
 
 const VELOCIDAD_BASE: float = 5.0
 const VELOCIDAD_SPRINT: float = 8.5
 const COSTO_SPRINT: float = 5.0
+const COSTO_ATAQUE_BASE: float = 10.0
+const COSTO_ESQUIVAR: float = 20.0
 const GRAVEDAD: float = 9.8
 const SENSIBILIDAD_X: float = 0.003
 const SENSIBILIDAD_Y: float = 0.002
 const ALTURA_OJOS: float = 1.6
 const DISTANCIA_TERCERA_PERSONA: float = 5.0
+const IMPULSO_ESQUIVAR: float = 9.5
 const GATE_ARMADURA := {
 	"ligera": 0.0,
 	"media": 20.0,
@@ -23,6 +28,12 @@ const STATS := ["fuerza", "destreza", "inteligencia", "resistencia", "vitalidad"
 
 @export var energia_actual: float = 100.0
 ## Energía actual consumida por sprint y otras habilidades.
+
+@export var hp_actual: float = 0.0
+## Vida actual calculada desde Vitalidad.
+
+@export var mana_actual: float = 0.0
+## Maná actual calculado desde Inteligencia y Arcano.
 
 @export var color_clase: Color = Color(1.0, 1.0, 1.0, 1.0)
 ## Color del material de la cápsula para identificar la clase.
@@ -41,21 +52,28 @@ var _spring_arm: SpringArm3D
 var _camera: Camera3D
 var _mesh_capsula: MeshInstance3D
 var _collision_capsula: CollisionShape3D
+var _ui_recursos: CanvasLayer
+var _barras_recursos: Dictionary = {}
+var _muerto: bool = false
 
 func _ready() -> void:
-	# Inicializa estadísticas base, energía y el rig visual/cámara del jugador.
+	# Inicializa estadísticas base, recursos y el rig visual/cámara del jugador.
 	_inicializar_stats()
 	_asegurar_stats_completas()
-	energia_actual = energia_maxima
 	_construir_capsula_placeholder()
 	_construir_rig_camara()
+	_construir_ui_recursos()
+	recurso_cambiado.connect(_on_recurso_cambiado)
 	_recalcular_todas_las_stats()
+	_sincronizar_recursos_desde_stats(true)
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	# El pivot sigue la posición del jugador sin heredar su rotación para desacoplar cámara y facing.
 	if _cam_pivot != null:
 		_cam_pivot.global_position = global_position
+
+	_regenerar_recursos(delta)
 
 func _input(event: InputEvent) -> void:
 	# Gestiona cámara con mouse capturado y toggles de captura/primera persona.
@@ -70,6 +88,9 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_camara"):
 		toggle_primera_persona()
 
+	if event.is_action_pressed("esquivar"):
+		esquivar()
+
 func _physics_process(delta: float) -> void:
 	# Lee input en plano XZ y lo transforma a espacio mundo usando la orientación horizontal del pivot.
 	var direccion_input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
@@ -78,7 +99,7 @@ func _physics_process(delta: float) -> void:
 	var en_movimiento := dir_mundo.length_squared() > 0.0
 	var velocidad_actual := VELOCIDAD_BASE
 
-	# Sprint solo consume energía cuando realmente hay movimiento; si no alcanza, vuelve a velocidad base.
+	# Correr cuesta 5 por segundo y usa la fórmula escalada por Destreza con mínimo de 2.
 	if en_movimiento and Input.is_action_pressed("sprint") and gastar_energia(COSTO_SPRINT * delta):
 		velocidad_actual = VELOCIDAD_SPRINT
 
@@ -119,6 +140,18 @@ func get_stat(nombre: String) -> float:
 		emit_signal("stat_cambiada", nombre, valor)
 	return valor
 
+func get_hp_max() -> float:
+	# HP máximo = Vitalidad * 10.
+	return get_stat("vitalidad") * 10.0
+
+func get_mana_max() -> float:
+	# Mana máximo = Inteligencia * 8 + Arcano * 4.
+	return get_stat("inteligencia") * 8.0 + get_stat("arcano") * 4.0
+
+func get_tier_hechizo() -> int:
+	# Tier = floor(Arcano / 10), con mínimo 1.
+	return max(1, int(floor(get_stat("arcano") / 10.0)))
+
 func agregar_modificador(nombre: String, valor: float, fuente: String) -> void:
 	# Registra un modificador por fuente para poder removerlo de forma agrupada después.
 	if not STATS.has(nombre):
@@ -139,15 +172,108 @@ func puede_equipar_armadura(tipo_armadura: String) -> bool:
 		return true
 	return get_stat("resistencia") >= float(GATE_ARMADURA.get(tipo_armadura, INF))
 
-func gastar_energia(costo: float) -> bool:
-	# Consume energía y falla si no hay suficiente recurso disponible.
-	if costo <= 0.0:
+func gastar_energia(cantidad: float) -> bool:
+	# Costo real de energía = max(2, costo_base - Destreza * 0.3).
+	if cantidad <= 0.0:
 		return true
-	if energia_actual < costo:
-		energia_actual = max(energia_actual, 0.0)
+	var costo_real := max(2.0, cantidad - get_stat("destreza") * 0.3)
+	if energia_actual < costo_real:
+		_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
 		return false
-	energia_actual = max(energia_actual - costo, 0.0)
+	energia_actual = max(energia_actual - costo_real, 0.0)
+	_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
 	return true
+
+func gastar_mana(cantidad: float) -> bool:
+	# El maná usa costo directo sin reducción base adicional.
+	if cantidad <= 0.0:
+		return true
+	if mana_actual < cantidad:
+		_emitir_cambio_recurso("mana", mana_actual, get_mana_max())
+		return false
+	mana_actual = max(mana_actual - cantidad, 0.0)
+	_emitir_cambio_recurso("mana", mana_actual, get_mana_max())
+	return true
+
+func recibir_dano(cantidad: float, tipo: String) -> void:
+	var reduccion := cantidad
+	match tipo:
+		"fisico":
+			# Daño físico recibido = daño entrante * max(0, 1 - Resistencia * 0.015).
+			reduccion = cantidad * max(0.0, 1.0 - get_stat("resistencia") * 0.015)
+		"magico":
+			# El daño mágico no se reduce por Resistencia base.
+			reduccion = cantidad
+		_:
+			reduccion = cantidad
+
+	hp_actual -= reduccion
+	hp_actual = max(hp_actual, 0.0)
+	_emitir_cambio_recurso("hp", hp_actual, get_hp_max())
+
+	if hp_actual <= 0.0 and not _muerto:
+		_muerto = true
+		emit_signal("jugador_murio")
+
+func atacar(objetivo: Node, arma: Arma) -> void:
+	if objetivo == null or arma == null:
+		return
+	if not objetivo.has_method("recibir_dano"):
+		return
+	if not gastar_energia(COSTO_ATAQUE_BASE):
+		return
+
+	var dano := arma.dano_base
+	match arma.tipo_arma:
+		"espada", "maza":
+			# Espada/Maza = daño base * 1.0 + Fuerza * 1.0.
+			dano = arma.dano_base * 1.0 + get_stat("fuerza") * 1.0
+		"daga", "katana":
+			# Daga/Katana = daño base * 0.5 + Destreza * 1.5.
+			dano = arma.dano_base * 0.5 + get_stat("destreza") * 1.5
+		"arco":
+			# Arco = daño base * 0.6 + Destreza * 1.2.
+			dano = arma.dano_base * 0.6 + get_stat("destreza") * 1.2
+		"escudo":
+			# Escudo = daño base * 0.7 + Fuerza * 0.7.
+			dano = arma.dano_base * 0.7 + get_stat("fuerza") * 0.7
+
+	objetivo.recibir_dano(dano, "fisico")
+
+func esquivar() -> void:
+	if not gastar_energia(COSTO_ESQUIVAR):
+		return
+
+	var direccion_input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var direccion_local := Vector3(direccion_input.x, 0.0, direccion_input.y)
+	var direccion_mundo := (_cam_pivot.global_transform.basis * direccion_local).normalized()
+	if direccion_mundo.length_squared() == 0.0:
+		direccion_mundo = -global_transform.basis.z.normalized()
+
+	# Esquivar aplica un impulso contrario al desplazamiento actual para salir de la trayectoria.
+	velocity.x = -direccion_mundo.x * IMPULSO_ESQUIVAR
+	velocity.z = -direccion_mundo.z * IMPULSO_ESQUIVAR
+
+func lanzar_hechizo(hechizo: Variant) -> Dictionary:
+	var dano_base := 0.0
+	var costo_base := 0.0
+	if hechizo is Dictionary:
+		dano_base = float(hechizo.get("dano_base", 0.0))
+		costo_base = float(hechizo.get("costo_mana", 0.0))
+	else:
+		dano_base = float(hechizo.get("dano_base"))
+		costo_base = float(hechizo.get("costo_mana"))
+
+	var tier_hechizo := get_tier_hechizo()
+	# Daño final = daño base * (1 + 0.15 * tier de hechizo).
+	var dano_final := dano_base * (1.0 + 0.15 * float(tier_hechizo))
+	# Costo de maná = costo base * max(0.1, 1 - 0.10 * tier de hechizo).
+	var costo_mana := costo_base * max(0.1, 1.0 - 0.10 * float(tier_hechizo))
+
+	if not gastar_mana(costo_mana):
+		return {"lanzado": false, "dano": 0.0, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo}
+
+	return {"lanzado": true, "dano": dano_final, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo}
 
 func toggle_primera_persona() -> void:
 	# Alterna entre cámara tercera/primera persona y oculta la cápsula al mirar desde dentro.
@@ -186,11 +312,58 @@ func _reconstruir_modificadores() -> void:
 			var stat: String = String(mod.get("stat", ""))
 			stats_modificadores[stat] = float(stats_modificadores.get(stat, 0.0)) + float(mod.get("valor", 0.0))
 	_recalcular_todas_las_stats()
+	_sincronizar_recursos_desde_stats(false)
 
 func _recalcular_todas_las_stats() -> void:
 	# Fuerza la actualización/cacheo de todas las stats para disparar la señal cuando corresponda.
 	for stat in STATS:
 		get_stat(stat)
+
+func _sincronizar_recursos_desde_stats(restaurar_completo: bool) -> void:
+	var hp_max := get_hp_max()
+	var mana_max := get_mana_max()
+	energia_maxima = 100.0
+
+	if restaurar_completo or hp_actual <= 0.0:
+		hp_actual = hp_max
+	else:
+		hp_actual = clamp(hp_actual, 0.0, hp_max)
+
+	if restaurar_completo or mana_actual <= 0.0:
+		mana_actual = mana_max
+	else:
+		mana_actual = clamp(mana_actual, 0.0, mana_max)
+
+	if restaurar_completo or energia_actual <= 0.0:
+		energia_actual = energia_maxima
+	else:
+		energia_actual = clamp(energia_actual, 0.0, energia_maxima)
+
+	_emitir_cambio_recurso("hp", hp_actual, hp_max)
+	_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
+	_emitir_cambio_recurso("mana", mana_actual, mana_max)
+
+func _regenerar_recursos(delta: float) -> void:
+	var hp_previa := hp_actual
+	var energia_previa := energia_actual
+	var hp_max := get_hp_max()
+
+	# Regeneración de HP = Vitalidad * 0.05 por segundo, limitada por hp_max.
+	hp_actual = clamp(hp_actual + get_stat("vitalidad") * 0.05 * delta, 0.0, hp_max)
+	# Regeneración de Energía = 8 puntos por segundo, limitada por 100.
+	energia_actual = clamp(energia_actual + 8.0 * delta, 0.0, energia_maxima)
+
+	if not is_equal_approx(hp_previa, hp_actual):
+		_emitir_cambio_recurso("hp", hp_actual, hp_max)
+	if not is_equal_approx(energia_previa, energia_actual):
+		_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
+
+func _emitir_cambio_recurso(tipo: String, actual: float, maximo: float) -> void:
+	emit_signal("recurso_cambiado", tipo, actual, maximo)
+
+func _on_recurso_cambiado(tipo: String, actual: float, maximo: float) -> void:
+	# La UI se refresca exclusivamente en respuesta a la signal recurso_cambiado.
+	_actualizar_barra_recurso(tipo, actual, maximo)
 
 func _construir_capsula_placeholder() -> void:
 	# Crea la representación visual/colisión del jugador usando solo primitivas nativas de Godot.
@@ -233,3 +406,44 @@ func _construir_rig_camara() -> void:
 	_camera.name = "Camera3D"
 	_camera.current = true
 	_spring_arm.add_child(_camera)
+
+func _construir_ui_recursos() -> void:
+	_ui_recursos = CanvasLayer.new()
+	_ui_recursos.name = "UIRecursos"
+	add_child(_ui_recursos)
+
+	var panel := Control.new()
+	panel.name = "PanelRecursos"
+	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel.position = Vector2(24.0, 24.0)
+	panel.size = Vector2(260.0, 84.0)
+	_ui_recursos.add_child(panel)
+
+	_crear_barra_recurso(panel, "hp", Color(0.75, 0.12, 0.12, 1.0), 0.0)
+	_crear_barra_recurso(panel, "energia", Color(0.92, 0.78, 0.18, 1.0), 28.0)
+	_crear_barra_recurso(panel, "mana", Color(0.18, 0.42, 0.95, 1.0), 56.0)
+
+func _crear_barra_recurso(panel: Control, tipo: String, color: Color, y: float) -> void:
+	var fondo := ColorRect.new()
+	fondo.name = "%sFondo" % tipo.capitalize()
+	fondo.color = Color(0.08, 0.08, 0.08, 0.9)
+	fondo.position = Vector2(0.0, y)
+	fondo.size = Vector2(220.0, 20.0)
+	panel.add_child(fondo)
+
+	var relleno := ColorRect.new()
+	relleno.name = "%sRelleno" % tipo.capitalize()
+	relleno.color = color
+	relleno.position = Vector2(0.0, y)
+	relleno.size = Vector2(220.0, 20.0)
+	panel.add_child(relleno)
+	_barras_recursos[tipo] = relleno
+
+func _actualizar_barra_recurso(tipo: String, actual: float, maximo: float) -> void:
+	var barra := _barras_recursos.get(tipo, null) as ColorRect
+	if barra == null:
+		return
+	var proporcion := 0.0
+	if maximo > 0.0:
+		proporcion = clamp(actual / maximo, 0.0, 1.0)
+	barra.size.x = 220.0 * proporcion
