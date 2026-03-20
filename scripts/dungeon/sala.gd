@@ -188,7 +188,7 @@ func _crear_pared_lado(direccion: String) -> void:
 
 	var longitud := _longitud_pared(direccion)
 	var mitad_hueco := ANCHO_HUECO_PUERTA * 0.5
-	var segmento_lateral := max((longitud - ANCHO_HUECO_PUERTA) * 0.5, 0.5)
+	var segmento_lateral : float= max((longitud - ANCHO_HUECO_PUERTA) * 0.5, 0.5)
 	_crear_segmento_pared(direccion, -(mitad_hueco + segmento_lateral * 0.5), segmento_lateral, ALTURA_PARED, false)
 	_crear_segmento_pared(direccion, mitad_hueco + segmento_lateral * 0.5, segmento_lateral, ALTURA_PARED, false)
 	_crear_segmento_pared(direccion, 0, ANCHO_HUECO_PUERTA, ALTURA_PARED - ALTURA_HUECO_PUERTA, true)

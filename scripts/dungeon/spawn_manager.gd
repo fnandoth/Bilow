@@ -1,4 +1,3 @@
-class_name SpawnManager
 extends Node
 
 const GOBLIN_SCENE := preload("res://scripts/mobs/goblin.gd")

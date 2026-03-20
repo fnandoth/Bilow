@@ -1,4 +1,3 @@
-class_name SaveManager
 extends Node
 
 const SAVE_PATH := "user://bilow_save.cfg"
@@ -167,7 +166,7 @@ func deserializar_item(data: Variant) -> Item:
 	if data == null or not (data is Dictionary):
 		return null
 	var item_class := String((data as Dictionary).get("class", "Item"))
-	var script := ITEM_SCRIPTS.get(item_class, ITEM_SCRIPTS["Item"])
+	var script : Item= ITEM_SCRIPTS.get(item_class, ITEM_SCRIPTS["Item"])
 	var item := script.new() as Item
 	item.nombre = String(data.get("nombre", item.nombre))
 	item.tipo_item = String(data.get("tipo_item", item.tipo_item))

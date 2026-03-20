@@ -1,4 +1,3 @@
-class_name GeneradorPiso
 extends Node3D
 
 const SalaScript := preload("res://scripts/dungeon/sala.gd")
@@ -119,7 +118,7 @@ func _forzar_expansion(celdas_ocupadas: Dictionary) -> Sala:
 		var direcciones := DIRECCIONES.keys()
 		direcciones.shuffle()
 		for direccion in direcciones:
-			var destino := sala_base.posicion_grid + DIRECCIONES[direccion]
+			var destino : Vector2i = sala_base.posicion_grid + DIRECCIONES[direccion]
 			if not _esta_en_limites(destino) or celdas_ocupadas.has(destino):
 				continue
 			var nueva_sala := _crear_sala("combate", destino)
@@ -134,7 +133,7 @@ func _asignar_tipos_especiales() -> void:
 	var sala_mas_lejana := salas[0]
 	var distancia_maxima := -1
 	for sala in salas:
-		var distancia := abs(sala.posicion_grid.x) + abs(sala.posicion_grid.y)
+		var distancia : int = abs(sala.posicion_grid.x) + abs(sala.posicion_grid.y)
 		if distancia > distancia_maxima:
 			distancia_maxima = distancia
 			sala_mas_lejana = sala

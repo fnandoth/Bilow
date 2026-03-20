@@ -1,4 +1,3 @@
-class_name RunManager
 extends Node
 
 const HUB_SCENE := "res://scenes/hub.tscn"

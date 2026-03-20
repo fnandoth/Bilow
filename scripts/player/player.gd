@@ -152,7 +152,7 @@ func _inicializar_stats() -> void:
 func get_stat(nombre: String) -> float:
 	# Retorna base + modificadores y emite señal solo si el valor cacheado cambió desde la última consulta.
 	var valor := float(stats_base.get(nombre, 0.0)) + float(stats_modificadores.get(nombre, 0.0))
-	var previo := _stats_cache.get(nombre, null)
+	var previo = _stats_cache.get(nombre, null)
 	if previo == null or not is_equal_approx(float(previo), valor):
 		_stats_cache[nombre] = valor
 		emit_signal("stat_cambiada", nombre, valor)
@@ -205,7 +205,7 @@ func gastar_energia(cantidad: float) -> bool:
 	# Costo real de energía = max(2, costo_base - Destreza * 0.3), salvo overrides temporales de gameplay.
 	if cantidad <= 0.0:
 		return true
-	var costo_real := max(2.0, cantidad - get_stat("destreza") * 0.3)
+	var costo_real : float= max(2.0, cantidad - get_stat("destreza") * 0.3)
 	if get_modificador("esquiva_gratis_hasta") > 0.0 and is_equal_approx(cantidad, COSTO_ESQUIVAR):
 		costo_real = 0.0
 	if energia_actual < costo_real:
@@ -239,7 +239,7 @@ func recibir_dano(cantidad: float, tipo: String) -> void:
 			reduccion = cantidad
 
 	if _escudo_temporal_actual > 0.0:
-		var absorbido := min(_escudo_temporal_actual, reduccion)
+		var absorbido : float= min(_escudo_temporal_actual, reduccion)
 		_escudo_temporal_actual -= absorbido
 		reduccion -= absorbido
 	hp_actual -= reduccion
@@ -276,7 +276,7 @@ func atacar(objetivo: Node, arma: Arma) -> void:
 
 	if arma.tipo_arma == "espada":
 		dano *= 1.0 + get_modificador("bonus_dano_espada_pct")
-	var critico := randf() <= clamp(0.1 + get_stat("destreza") * 0.01, 0.1, 0.45)
+	var critico :float= randf() <= clamp(0.1 + get_stat("destreza") * 0.01, 0.1, 0.45)
 	if critico:
 		dano *= 1.5
 		emit_signal("ataque_critico", objetivo, arma.tipo_arma, dano)
@@ -315,7 +315,7 @@ func lanzar_hechizo(hechizo: Variant) -> Dictionary:
 	var dano_final := dano_base * (1.0 + 0.15 * float(tier_hechizo))
 	var penetracion := get_modificador("hechizos_penetracion_pct")
 	# Costo de maná = costo base * max(0.1, 1 - 0.10 * tier de hechizo).
-	var costo_mana := costo_base * max(0.1, 1.0 - 0.10 * float(tier_hechizo))
+	var costo_mana :float= costo_base * max(0.1, 1.0 - 0.10 * float(tier_hechizo))
 
 	if not gastar_mana(costo_mana):
 		return {"lanzado": false, "dano": 0.0, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo}

@@ -12,7 +12,7 @@ func _ready() -> void:
 	var player := get_parent() as Player
 	if player == null:
 		return
-	var clase_jugador := player.get_script().get_global_name() if player.get_script() != null else "Player"
+	var clase_jugador:String = player.get_script().get_global_name() if player.get_script() != null else "Player"
 	pool_clase = PasivaFactory.crear_pool_clase(clase_jugador)
 	pool_generico = PasivaFactory.crear_pool_generico()
 
