@@ -1,5 +1,7 @@
 extends Node3D
 
+signal piso_listo(centro_inicio: Vector3)
+
 const SalaScript := preload("res://scripts/dungeon/sala.gd")
 const MinimapScript := preload("res://scripts/dungeon/minimap_piso.gd")
 const DungeonBuilderScript := preload("res://scripts/dungeon/dungeon_builder.gd")
@@ -96,6 +98,10 @@ func generar_piso(numero_piso: int, seed: int = -1) -> Array[Sala]:
 	_asignar_tipos_especiales()
 	_construir_dungeon_visual()
 	minimap.construir(salas)
+	var sala_inicio := _obtener_sala_inicio()
+	if sala_inicio != null:
+		var centro_inicio := sala_inicio.global_position + Vector3(0.0, 1.0, 0.0)
+		emit_signal("piso_listo", centro_inicio)
 	return salas
 
 # Crea la Sala lógica en la coordenada de grilla indicada, la posiciona usando TAMANO_CELDA=20 y la añade al árbol sin geometría CSG propia.
@@ -177,3 +183,9 @@ func _limpiar_piso_actual() -> void:
 		if is_instance_valid(sala):
 			sala.queue_free()
 	salas.clear()
+
+func _obtener_sala_inicio() -> Sala:
+	for sala in salas:
+		if sala != null and sala.tipo == "inicio" and sala.posicion_grid == Vector2i.ZERO:
+			return sala
+	return null
