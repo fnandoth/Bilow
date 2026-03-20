@@ -13,6 +13,10 @@ const STAT_POOL := [
 	"bonus_arcano",
 ]
 
+@export var bonus_critico: float = 0.0
+@export var bonus_suerte: float = 0.0
+@export var bonus_cdr: float = 0.0
+
 func _init() -> void:
 	tipo_item = "accesorio"
 	nombre = "Anillo"

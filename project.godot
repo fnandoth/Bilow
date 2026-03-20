@@ -13,11 +13,14 @@ config_version=5
 config/name="Bilow"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
+run/main_scene="res://scenes/hub.tscn"
 
 [autoload]
 
 GeneradorPiso="*res://scripts/dungeon/generador_piso.gd"
 SpawnManager="*res://scripts/dungeon/spawn_manager.gd"
+SaveManager="*res://scripts/core/save_manager.gd"
+RunManager="*res://scripts/core/run_manager.gd"
 
 [input]
 
