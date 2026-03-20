@@ -20,6 +20,9 @@ const STAT_POOL := [
 @export var req_resistencia: int = 0
 ## Resistencia mínima para equiparla.
 
+@export_enum("casco", "pechera", "pantalon", "botas", "guantes", "cinturon") var slot_equipamiento: String = "pechera"
+## Slot concreto del personaje en el que puede equiparse la armadura.
+
 func _init() -> void:
 	tipo_item = "armadura"
 	nombre = "Armadura"
