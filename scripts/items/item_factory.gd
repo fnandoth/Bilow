@@ -3,6 +3,7 @@ extends Resource
 
 const WEAPON_TYPES := ["espada", "daga", "arco", "maza", "katana", "escudo"]
 const ARMOR_TYPES := ["ligera", "media", "pesada"]
+const ARMOR_EQUIP_SLOTS := ["casco", "pechera", "pantalon", "botas", "guantes", "cinturon"]
 const ELEMENTS := ["fuego", "hielo", "rayo", "veneno", "sagrado", "sombras"]
 const MAIN_STATS := ["fuerza", "destreza", "inteligencia", "resistencia", "vitalidad", "arcano"]
 const WEAPON_STAT_POOL := [
@@ -21,15 +22,19 @@ const DEFAULT_ITEM_NAMES := {
 	"amuleto": "Amuleto %s",
 }
 
+static var _rng := RandomNumberGenerator.new()
+static var _rng_inicializado := false
+
 static func generar(tipo: String, rareza: int) -> Item:
-	var rng := RandomNumberGenerator.new()
-	rng.randomize()
+	if not _rng_inicializado:
+		_rng.randomize()
+		_rng_inicializado = true
 	var rareza_normalizada := clampi(rareza, 0, 4)
-	var item := _crear_base(tipo.to_lower(), rareza_normalizada, rng)
+	var item := _crear_base(tipo.to_lower(), rareza_normalizada, _rng)
 	if item == null:
 		return null
 
-	item.stats_extra = _generar_stats_extra_para_item(item, rng)
+	item.stats_extra = _generar_stats_extra_para_item(item, _rng)
 	item.limitar_stats_extra()
 	return item
 
@@ -47,9 +52,10 @@ static func _crear_base(tipo: String, rareza: int, rng: RandomNumberGenerator) -
 			var armadura := Armadura.new()
 			armadura.rareza = rareza
 			armadura.tipo_armadura = ARMOR_TYPES[rng.randi_range(0, ARMOR_TYPES.size() - 1)]
+			armadura.slot_equipamiento = ARMOR_EQUIP_SLOTS[rng.randi_range(0, ARMOR_EQUIP_SLOTS.size() - 1)]
 			armadura.armadura_base = rng.randi_range(8, 30) + rareza * 10
 			armadura.req_resistencia = rng.randi_range(0, 8) + rareza * 4
-			armadura.nombre = DEFAULT_ITEM_NAMES["armadura"] % _capitalizar(armadura.tipo_armadura)
+			armadura.nombre = "%s %s" % [_capitalizar(armadura.slot_equipamiento), _capitalizar(armadura.tipo_armadura)]
 			return armadura
 		"anillo":
 			var anillo := Anillo.new()

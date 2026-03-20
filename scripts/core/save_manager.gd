@@ -151,6 +151,7 @@ func serializar_item(item: Item) -> Variant:
 		data["armadura_base"] = (item as Armadura).armadura_base
 		data["tipo_armadura"] = (item as Armadura).tipo_armadura
 		data["req_resistencia"] = (item as Armadura).req_resistencia
+		data["slot_equipamiento"] = (item as Armadura).slot_equipamiento
 	if item is Amuleto:
 		data["aumento_stat_principal"] = (item as Amuleto).aumento_stat_principal.duplicate(true)
 		data["aumento_dano_elemental"] = (item as Amuleto).aumento_dano_elemental.duplicate(true)
@@ -182,6 +183,7 @@ func deserializar_item(data: Variant) -> Item:
 		(item as Armadura).armadura_base = int(data.get("armadura_base", 0))
 		(item as Armadura).tipo_armadura = String(data.get("tipo_armadura", "ligera"))
 		(item as Armadura).req_resistencia = int(data.get("req_resistencia", 0))
+		(item as Armadura).slot_equipamiento = String(data.get("slot_equipamiento", "pechera"))
 	if item is Amuleto:
 		(item as Amuleto).aumento_stat_principal = (data.get("aumento_stat_principal", {}) as Dictionary).duplicate(true)
 		(item as Amuleto).aumento_dano_elemental = (data.get("aumento_dano_elemental", {}) as Dictionary).duplicate(true)
@@ -232,6 +234,3 @@ func _cargar_archivos() -> void:
 func _asegurar_cofre_slots() -> void:
 	if cofre_inter_run.size() != CHEST_SLOTS:
 		cofre_inter_run.resize(CHEST_SLOTS)
-		for indice in range(CHEST_SLOTS):
-			if cofre_inter_run[indice] == null:
-				cofre_inter_run[indice] = null
