@@ -63,6 +63,7 @@ func _on_mob_murio(mob_ref: Mob) -> void:
 	var player := get_parent() as Player
 	if player != null:
 		player.registrar_muerte_enemigo(mob_ref)
+	SaveManager.registrar_mob(mob_ref.nombre)
 
 func _generar_tabla_xp(niveles: int) -> void:
 	tabla_xp.clear()
@@ -113,3 +114,4 @@ func _on_jugador_murio() -> void:
 		var pasiva_manager := player.get_node_or_null("PasivaManager") as PasivaManager
 		if pasiva_manager != null:
 			pasiva_manager.limpiar_pasivas()
+		RunManager.procesar_muerte(player)

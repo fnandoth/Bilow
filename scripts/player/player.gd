@@ -323,6 +323,16 @@ func lanzar_hechizo(hechizo: Variant) -> Dictionary:
 	return {"lanzado": true, "dano": dano_final, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo, "penetracion_res_magica": penetracion}
 
 
+func cargar_estado_guardado(estado: Dictionary) -> void:
+	oro = int(estado.get("oro", 0))
+	if pasiva_manager != null:
+		pasiva_manager.cargar_pasivas_descubiertas(estado.get("pasivas_descubiertas", []))
+
+func obtener_pasivas_descubiertas_descriptivas() -> Array[Dictionary]:
+	if pasiva_manager == null:
+		return []
+	return pasiva_manager.obtener_pasivas_descubiertas()
+
 func registrar_muerte_enemigo(mob_ref: Mob) -> void:
 	emit_signal("enemigo_derrotado", mob_ref, _ultimo_tipo_arma_usada)
 
