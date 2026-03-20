@@ -26,6 +26,7 @@ const VISUALES := {
 @export var resistencia_magica: float = 0.0
 @export var velocidad_movimiento: float = 3.0
 @export var velocidad_ataque: float = 1.0
+@export var xp_reward: float = 25.0
 @export var tier_visual: String = "normal"
 
 var _mesh: MeshInstance3D

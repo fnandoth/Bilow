@@ -4,6 +4,10 @@ extends CharacterBody3D
 signal stat_cambiada(nombre: String, valor_nuevo: float)
 signal jugador_murio()
 signal recurso_cambiado(tipo: String, actual: float, maximo: float)
+signal ataque_critico(objetivo: Node, arma_tipo: String, dano: float)
+signal enemigo_derrotado(mob_ref: Mob, arma_tipo: String)
+signal esquive_realizado()
+signal sala_iniciada(sala: Sala)
 
 const VELOCIDAD_BASE: float = 5.0
 const VELOCIDAD_SPRINT: float = 8.5
@@ -60,6 +64,12 @@ var _collision_capsula: CollisionShape3D
 var _ui_recursos: CanvasLayer
 var _barras_recursos: Dictionary = {}
 var _muerto: bool = false
+var _modificadores_gameplay: Dictionary = {}
+var _ultimo_tipo_arma_usada: String = ""
+var _ultimo_costo_esquiva: float = 0.0
+var _escudo_temporal_actual: float = 0.0
+var nivel_manager: NivelManager
+var pasiva_manager: PasivaManager
 
 func _ready() -> void:
 	# Inicializa estadísticas base, recursos y el rig visual/cámara del jugador.
@@ -69,9 +79,11 @@ func _ready() -> void:
 	_construir_rig_camara()
 	_construir_ui_recursos()
 	_construir_componentes_inventario()
+	_construir_componentes_progresion()
 	recurso_cambiado.connect(_on_recurso_cambiado)
 	_recalcular_todas_las_stats()
 	_sincronizar_recursos_desde_stats(true)
+	add_to_group("player")
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _process(delta: float) -> void:
@@ -159,18 +171,29 @@ func get_tier_hechizo() -> int:
 	return max(1, int(floor(get_stat("arcano") / 10.0)))
 
 func agregar_modificador(nombre: String, valor: float, fuente: String) -> void:
-	# Registra un modificador por fuente para poder removerlo de forma agrupada después.
-	if not STATS.has(nombre):
+	# Registra modificadores de stats y gameplay por fuente para removerlos al limpiar una pasiva o item.
+	if STATS.has(nombre):
+		if not _modificadores_por_fuente.has(fuente):
+			_modificadores_por_fuente[fuente] = []
+		_modificadores_por_fuente[fuente].append({"stat": nombre, "valor": valor})
+		_reconstruir_modificadores()
 		return
-	if not _modificadores_por_fuente.has(fuente):
-		_modificadores_por_fuente[fuente] = []
-	_modificadores_por_fuente[fuente].append({"stat": nombre, "valor": valor})
-	_reconstruir_modificadores()
+	if not _modificadores_gameplay.has(fuente):
+		_modificadores_gameplay[fuente] = {}
+	_modificadores_gameplay[fuente][nombre] = valor
 
 func remover_modificador(fuente: String) -> void:
 	# Elimina todos los modificadores asociados a una fuente concreta y refresca los totales.
-	if _modificadores_por_fuente.erase(fuente):
+	var cambio_stats := _modificadores_por_fuente.erase(fuente)
+	_modificadores_gameplay.erase(fuente)
+	if cambio_stats:
 		_reconstruir_modificadores()
+
+func get_modificador(nombre: String) -> float:
+	var total := 0.0
+	for mods in _modificadores_gameplay.values():
+		total += float((mods as Dictionary).get(nombre, 0.0))
+	return total
 
 func puede_equipar_armadura(tipo_armadura: String) -> bool:
 	# Usa Resistencia como gate configurable para armadura ligera, media o pesada.
@@ -179,10 +202,12 @@ func puede_equipar_armadura(tipo_armadura: String) -> bool:
 	return get_stat("resistencia") >= float(GATE_ARMADURA.get(tipo_armadura, INF))
 
 func gastar_energia(cantidad: float) -> bool:
-	# Costo real de energía = max(2, costo_base - Destreza * 0.3).
+	# Costo real de energía = max(2, costo_base - Destreza * 0.3), salvo overrides temporales de gameplay.
 	if cantidad <= 0.0:
 		return true
 	var costo_real := max(2.0, cantidad - get_stat("destreza") * 0.3)
+	if get_modificador("esquiva_gratis_hasta") > 0.0 and is_equal_approx(cantidad, COSTO_ESQUIVAR):
+		costo_real = 0.0
 	if energia_actual < costo_real:
 		_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
 		return false
@@ -213,6 +238,10 @@ func recibir_dano(cantidad: float, tipo: String) -> void:
 		_:
 			reduccion = cantidad
 
+	if _escudo_temporal_actual > 0.0:
+		var absorbido := min(_escudo_temporal_actual, reduccion)
+		_escudo_temporal_actual -= absorbido
+		reduccion -= absorbido
 	hp_actual -= reduccion
 	hp_actual = max(hp_actual, 0.0)
 	_emitir_cambio_recurso("hp", hp_actual, get_hp_max())
@@ -229,6 +258,7 @@ func atacar(objetivo: Node, arma: Arma) -> void:
 	if not gastar_energia(COSTO_ATAQUE_BASE):
 		return
 
+	_ultimo_tipo_arma_usada = arma.tipo_arma
 	var dano := arma.dano_base
 	match arma.tipo_arma:
 		"espada", "maza":
@@ -244,9 +274,18 @@ func atacar(objetivo: Node, arma: Arma) -> void:
 			# Escudo = daño base * 0.7 + Fuerza * 0.7.
 			dano = arma.dano_base * 0.7 + get_stat("fuerza") * 0.7
 
+	if arma.tipo_arma == "espada":
+		dano *= 1.0 + get_modificador("bonus_dano_espada_pct")
+	var critico := randf() <= clamp(0.1 + get_stat("destreza") * 0.01, 0.1, 0.45)
+	if critico:
+		dano *= 1.5
+		emit_signal("ataque_critico", objetivo, arma.tipo_arma, dano)
 	objetivo.recibir_dano(dano, "fisico")
 
 func esquivar() -> void:
+	_ultimo_costo_esquiva = max(0.0, max(2.0, COSTO_ESQUIVAR - get_stat("destreza") * 0.3))
+	if get_modificador("esquiva_gratis_hasta") >= float(Time.get_ticks_msec()):
+		_ultimo_costo_esquiva = 0.0
 	if not gastar_energia(COSTO_ESQUIVAR):
 		return
 
@@ -259,6 +298,7 @@ func esquivar() -> void:
 	# Esquivar aplica un impulso contrario al desplazamiento actual para salir de la trayectoria.
 	velocity.x = -direccion_mundo.x * IMPULSO_ESQUIVAR
 	velocity.z = -direccion_mundo.z * IMPULSO_ESQUIVAR
+	emit_signal("esquive_realizado")
 
 func lanzar_hechizo(hechizo: Variant) -> Dictionary:
 	var dano_base := 0.0
@@ -273,13 +313,59 @@ func lanzar_hechizo(hechizo: Variant) -> Dictionary:
 	var tier_hechizo := get_tier_hechizo()
 	# Daño final = daño base * (1 + 0.15 * tier de hechizo).
 	var dano_final := dano_base * (1.0 + 0.15 * float(tier_hechizo))
+	var penetracion := get_modificador("hechizos_penetracion_pct")
 	# Costo de maná = costo base * max(0.1, 1 - 0.10 * tier de hechizo).
 	var costo_mana := costo_base * max(0.1, 1.0 - 0.10 * float(tier_hechizo))
 
 	if not gastar_mana(costo_mana):
 		return {"lanzado": false, "dano": 0.0, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo}
 
-	return {"lanzado": true, "dano": dano_final, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo}
+	return {"lanzado": true, "dano": dano_final, "costo_mana": costo_mana, "tier_hechizo": tier_hechizo, "penetracion_res_magica": penetracion}
+
+
+func registrar_muerte_enemigo(mob_ref: Mob) -> void:
+	emit_signal("enemigo_derrotado", mob_ref, _ultimo_tipo_arma_usada)
+
+func registrar_sala(sala: Sala) -> void:
+	if sala == null:
+		return
+	if not sala.mob_registrado.is_connected(_on_sala_mob_registrado):
+		sala.mob_registrado.connect(_on_sala_mob_registrado)
+	emit_signal("sala_iniciada", sala)
+
+func reembolsar_energia(cantidad: float) -> void:
+	if cantidad <= 0.0:
+		return
+	energia_actual = min(energia_actual + cantidad, energia_maxima)
+	_emitir_cambio_recurso("energia", energia_actual, energia_maxima)
+
+func get_ultimo_costo_esquiva() -> float:
+	return _ultimo_costo_esquiva
+
+func otorgar_escudo_temporal(cantidad: float) -> void:
+	_escudo_temporal_actual += max(cantidad, 0.0)
+
+func invocar_minion_temporal(origen: Vector3) -> void:
+	var minion := Node3D.new()
+	minion.name = "MinionTemporal"
+	minion.position = origen + Vector3(0.0, 0.5, 0.0)
+	var visual := MeshInstance3D.new()
+	var esfera := SphereMesh.new()
+	esfera.radius = 0.25
+	visual.mesh = esfera
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.45, 0.85, 0.7, 1.0)
+	visual.material_override = material
+	minion.add_child(visual)
+	get_tree().current_scene.add_child(minion)
+	var tween := create_tween()
+	tween.tween_property(minion, "position:y", minion.position.y + 0.8, 0.5)
+	tween.tween_interval(2.0)
+	tween.tween_callback(minion.queue_free)
+
+func _on_sala_mob_registrado(mob: Mob) -> void:
+	if nivel_manager != null:
+		nivel_manager.registrar_mob(mob)
 
 func toggle_primera_persona() -> void:
 	# Alterna entre cámara tercera/primera persona y oculta la cápsula al mirar desde dentro.
@@ -413,6 +499,15 @@ func _construir_rig_camara() -> void:
 	_camera.current = true
 	_spring_arm.add_child(_camera)
 
+
+func _construir_componentes_progresion() -> void:
+	nivel_manager = NivelManager.new()
+	nivel_manager.name = "NivelManager"
+	add_child(nivel_manager)
+
+	pasiva_manager = PasivaManager.new()
+	pasiva_manager.name = "PasivaManager"
+	add_child(pasiva_manager)
 
 func _construir_componentes_inventario() -> void:
 	inventario_component = InventarioComponent.new()
