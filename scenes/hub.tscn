@@ -4,3 +4,6 @@
 
 [node name="Hub" type="Node3D"]
 script = ExtResource("1_hub")
+
+[node name="SpawnPoint" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 4)

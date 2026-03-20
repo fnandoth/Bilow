@@ -1,6 +1,7 @@
 extends Node3D
 
 const DUNGEON_SCENE := "res://scenes/dungeon_stub.tscn"
+const HUB_SPAWN_FALLBACK := Vector3(0.0, 1.0, 4.0)
 const CHEST_COLUMNS := 4
 const CHEST_SLOTS := 12
 const TAMANO_PIEZA := 2.0
@@ -190,7 +191,8 @@ func _cargar_o_crear_player() -> void:
 	player = Player.new()
 	player.name = "PlayerHub"
 	add_child(player)
-	player.global_position = Vector3(0.0, 0.0, 6.0)
+	var spawn_point := get_node_or_null("SpawnPoint") as Node3D
+	player.global_position = spawn_point.global_position if spawn_point != null else HUB_SPAWN_FALLBACK
 	player.cargar_estado_guardado(estado)
 	player.inventory_ui.visible = false
 	player._ui_recursos.visible = false
@@ -326,6 +328,7 @@ func _on_zona_salida_activada(body: Node3D) -> void:
 func _volver_a_dungeon() -> void:
 	SaveManager.guardar_estado(player)
 	SaveManager.decrementar_runs_cofre()
+	RunManager.viene_del_hub = true
 	get_tree().change_scene_to_file(DUNGEON_SCENE)
 
 # Reacciona cuando el jugador entra al libro de pasivas del suroeste para listar las pasivas descubiertas en el panel UI.
