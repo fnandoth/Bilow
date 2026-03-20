@@ -44,6 +44,11 @@ const STATS := ["fuerza", "destreza", "inteligencia", "resistencia", "vitalidad"
 @export var stats_modificadores: Dictionary = {}
 ## Suma acumulada de bonificaciones activas por stat.
 
+var oro: int = 0
+var inventario_component: InventarioComponent
+var equipamiento_component: EquipamientoComponent
+var inventory_ui: InventoryUI
+
 var en_primera_persona: bool = false
 var _modificadores_por_fuente: Dictionary = {}
 var _stats_cache: Dictionary = {}
@@ -63,6 +68,7 @@ func _ready() -> void:
 	_construir_capsula_placeholder()
 	_construir_rig_camara()
 	_construir_ui_recursos()
+	_construir_componentes_inventario()
 	recurso_cambiado.connect(_on_recurso_cambiado)
 	_recalcular_todas_las_stats()
 	_sincronizar_recursos_desde_stats(true)
@@ -406,6 +412,20 @@ func _construir_rig_camara() -> void:
 	_camera.name = "Camera3D"
 	_camera.current = true
 	_spring_arm.add_child(_camera)
+
+
+func _construir_componentes_inventario() -> void:
+	inventario_component = InventarioComponent.new()
+	inventario_component.name = "InventarioComponent"
+	add_child(inventario_component)
+
+	equipamiento_component = EquipamientoComponent.new()
+	equipamiento_component.name = "EquipamientoComponent"
+	add_child(equipamiento_component)
+
+	inventory_ui = InventoryUI.new()
+	inventory_ui.name = "InventoryUI"
+	add_child(inventory_ui)
 
 func _construir_ui_recursos() -> void:
 	_ui_recursos = CanvasLayer.new()
