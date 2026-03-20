@@ -2,6 +2,7 @@ class_name Sala
 extends Node3D
 
 signal sala_completada(sala: Sala)
+signal mob_registrado(mob: Mob)
 
 const ALTURA_PARED := 3.0
 const GROSOR_PARED := 0.6
@@ -52,6 +53,9 @@ func construir_geometria() -> void:
 
 func entrar_sala() -> void:
 	visitada = true
+	var jugadores := get_tree().get_nodes_in_group("player")
+	if not jugadores.is_empty() and jugadores[0] is Player:
+		(jugadores[0] as Player).registrar_sala(self)
 	_actualizar_minimapa()
 	if (tipo == "combate" or tipo == "arena" or tipo == "jefe") and not mobs_spawneados:
 		_spawn_manager = get_node_or_null("/root/SpawnManager")
@@ -78,6 +82,7 @@ func registrar_mob(mob: Mob) -> void:
 	_mobs_activos.append(mob)
 	if not mob.mob_murio.is_connected(_on_mob_muerto):
 		mob.mob_murio.connect(_on_mob_muerto)
+	emit_signal("mob_registrado", mob)
 
 func bloquear_puertas() -> void:
 	for blocker: StaticBody3D in _door_blockers.values():
