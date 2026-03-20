@@ -3,6 +3,11 @@ extends Node3D
 const DUNGEON_SCENE := "res://scenes/dungeon_stub.tscn"
 const CHEST_COLUMNS := 4
 const CHEST_SLOTS := 12
+const TAMANO_PIEZA := 2.0
+const TAMANO_HUB_PIEZAS := 10
+const ORIGEN_HUB := -9.0
+const COLOR_LUZ_ESQUINA := Color(1.0, 0.92, 0.72)
+const FALLBACK_PROPS := ["barrel", "crate"]
 
 var player: Player
 var oro_label: Label
@@ -11,61 +16,140 @@ var panel_contenido: VBoxContainer
 var panel_titulo: Label
 var dialogo_salida: ConfirmationDialog
 
+# Construye la sala fija del Hub con piezas KayKit, overlay UI y jugador persistente al cargar la escena principal.
 func _ready() -> void:
 	_construir_base_hub()
 	_construir_overlay()
 	_cargar_o_crear_player()
 	_refrescar_oro()
 
+# Monta suelo, perímetro, props interactivos, áreas de sub-zona y luces interiores en coordenadas modulares de 2u para un hub de 20x20.
 func _construir_base_hub() -> void:
-	var suelo := CSGBox3D.new()
-	suelo.size = Vector3(16.0, 0.5, 16.0)
-	suelo.position = Vector3(0.0, -0.25, 0.0)
-	var suelo_mat := StandardMaterial3D.new()
-	suelo_mat.albedo_color = Color(0.12, 0.24, 0.14)
-	suelo.material = suelo_mat
-	add_child(suelo)
+	for x in range(TAMANO_HUB_PIEZAS):
+		for z in range(TAMANO_HUB_PIEZAS):
+			_instanciar_grupo("floor", _coordenada_hub(x, z))
+	for x in range(TAMANO_HUB_PIEZAS):
+		if x in [4, 5]:
+			_instanciar_grupo(_grupo_puerta(), _coordenada_hub(x, 0), PI)
+		else:
+			_instanciar_grupo(_grupo_pared(), _coordenada_hub(x, 0), 0.0)
+		if x == 0 or x == TAMANO_HUB_PIEZAS - 1:
+			continue
+		_instanciar_grupo(_grupo_pared(), _coordenada_hub(x, TAMANO_HUB_PIEZAS - 1), PI)
+	for z in range(1, TAMANO_HUB_PIEZAS - 1):
+		_instanciar_grupo(_grupo_pared(), _coordenada_hub(0, z), PI * 0.5)
+		_instanciar_grupo(_grupo_pared(), _coordenada_hub(TAMANO_HUB_PIEZAS - 1, z), -PI * 0.5)
+	_instanciar_grupo(_grupo_esquina(), _coordenada_hub(0, 0), 0.0)
+	_instanciar_grupo(_grupo_esquina(), _coordenada_hub(TAMANO_HUB_PIEZAS - 1, 0), -PI * 0.5)
+	_instanciar_grupo(_grupo_esquina(), _coordenada_hub(TAMANO_HUB_PIEZAS - 1, TAMANO_HUB_PIEZAS - 1), PI)
+	_instanciar_grupo(_grupo_esquina(), _coordenada_hub(0, TAMANO_HUB_PIEZAS - 1), PI * 0.5)
+	var prop_cofre := _instanciar_prop_con_fallback(["chest"], "ZonaCofre", Vector3(-6.0, 0.0, -2.0))
+	var prop_taller := _instanciar_prop_con_fallback(["anvil", "forge"], "ZonaTaller", Vector3(6.0, 0.0, -2.0))
+	var prop_bestiario := _instanciar_prop_con_fallback(["bookcase", "shelf"], "ZonaBestiario", Vector3(0.0, 0.0, 6.0))
+	var prop_libro := _instanciar_prop_con_fallback(["table"], "LibroPasivas", Vector3(-6.0, 0.0, 6.0))
+	_instanciar_prop_con_fallback(["book"], "LibroPasivas", Vector3(-5.6, 1.1, 6.0))
+	var prop_salida := _instanciar_prop_con_fallback(["stairs", "gate"], "ZonaSalida", Vector3(0.0, 0.0, -6.0))
+	_crear_zona("ZonaCofre", prop_cofre.position + Vector3(0.0, 0.5, 0.0), _on_zona_cofre_activada)
+	_crear_zona("ZonaTaller", prop_taller.position + Vector3(0.0, 0.5, 0.0), _on_zona_taller_activada)
+	_crear_zona("ZonaBestiario", prop_bestiario.position + Vector3(0.0, 0.5, 0.0), _on_zona_bestiario_activada)
+	_crear_zona("LibroPasivas", prop_libro.position + Vector3(0.0, 0.5, 0.0), _on_libro_pasivas_activado)
+	_crear_zona("ZonaSalida", prop_salida.position + Vector3(0.0, 0.5, 0.0), _on_zona_salida_activada)
+	_agregar_luces_hub()
 
-	for pared_data in [
-		{"size": Vector3(16.0, 4.0, 0.5), "pos": Vector3(0.0, 2.0, -8.0)},
-		{"size": Vector3(16.0, 4.0, 0.5), "pos": Vector3(0.0, 2.0, 8.0)},
-		{"size": Vector3(0.5, 4.0, 16.0), "pos": Vector3(-8.0, 2.0, 0.0)},
-		{"size": Vector3(0.5, 4.0, 16.0), "pos": Vector3(8.0, 2.0, 0.0)},
-	]:
-		var pared := CSGBox3D.new()
-		pared.size = pared_data["size"]
-		pared.position = pared_data["pos"]
-		var pared_mat := StandardMaterial3D.new()
-		pared_mat.albedo_color = Color(0.88, 0.82, 0.68)
-		pared.material = pared_mat
-		add_child(pared)
+# Devuelve la coordenada mundial de una pieza modular del Hub para mantener todas las instancias alineadas a la retícula de 2 unidades.
+func _coordenada_hub(x: int, z: int) -> Vector3:
+	return Vector3(ORIGEN_HUB + x * TAMANO_PIEZA, 0.0, ORIGEN_HUB + z * TAMANO_PIEZA)
 
-	_crear_zona("ZonaCofre", Vector3(-4.5, 0.5, -3.0), Color(0.65, 0.42, 0.12), _on_zona_cofre_activada)
-	_crear_zona("ZonaTaller", Vector3(4.5, 0.5, -3.0), Color(0.35, 0.35, 0.35), _on_zona_taller_activada)
-	_crear_zona("ZonaBestiario", Vector3(-4.5, 0.5, 3.0), Color(0.25, 0.25, 0.5), _on_zona_bestiario_activada)
-	_crear_zona("ZonaSalida", Vector3(4.5, 0.5, 3.0), Color(0.2, 0.5, 0.25), _on_zona_salida_activada)
-	_crear_zona("LibroPasivas", Vector3(0.0, 0.5, 0.0), Color(0.55, 0.18, 0.18), _on_libro_pasivas_activado)
+# Instancia una pieza del grupo pedido en la coordenada exacta del Hub y aplica la rotación cardinal que la alinea con el muro o prop deseado.
+func _instanciar_grupo(nombre_grupo: String, posicion: Vector3, rot_y: float = 0.0) -> Node3D:
+	var grupos := AssetManager.obtener_grupo(nombre_grupo)
+	if grupos.is_empty() and nombre_grupo == "door":
+		grupos = AssetManager.obtener_grupo("doorway")
+	if grupos.is_empty() and nombre_grupo == "wall_corner":
+		grupos = AssetManager.obtener_grupo("corner")
+	if grupos.is_empty() and nombre_grupo == "wall":
+		return _crear_fallback_visual(posicion, rot_y)
+	if grupos.is_empty():
+		push_warning("Hub: sin piezas para grupo '" + nombre_grupo + "'")
+		return _crear_fallback_visual(posicion, rot_y)
+	var escena := AssetManager.obtener(grupos.pick_random())
+	if escena == null:
+		return _crear_fallback_visual(posicion, rot_y)
+	var instancia := escena.instantiate() as Node3D
+	if instancia == null:
+		return _crear_fallback_visual(posicion, rot_y)
+	instancia.position = posicion
+	instancia.rotation.y = rot_y
+	add_child(instancia)
+	return instancia
 
-func _crear_zona(nombre: String, posicion: Vector3, color: Color, callback: Callable) -> void:
+# Busca un prop por prioridad semántica y lo coloca en la coordenada indicada; si falta, usa barrel/crate para que la sub-zona siga siendo visible.
+func _instanciar_prop_con_fallback(preferencias: Array[String], etiqueta: String, posicion: Vector3) -> Node3D:
+	for nombre in preferencias:
+		var grupo := AssetManager.obtener_grupo(nombre)
+		if not grupo.is_empty():
+			return _instanciar_grupo(grupo.pick_random(), posicion)
+	for fallback in FALLBACK_PROPS:
+		var grupo_fallback := AssetManager.obtener_grupo(fallback)
+		if not grupo_fallback.is_empty():
+			push_warning("Hub: prop faltante en %s, usando fallback '%s'." % [etiqueta, fallback])
+			return _instanciar_grupo(grupo_fallback.pick_random(), posicion)
+	push_warning("Hub: sin props ni fallbacks para %s." % etiqueta)
+	return _crear_fallback_visual(posicion, 0.0)
+
+# Crea un Area3D esférico de radio 2 sobre el prop correspondiente para conservar la lógica de interacción del Prompt 7 sin cambiar callbacks.
+func _crear_zona(nombre: String, posicion: Vector3, callback: Callable) -> void:
 	var area := Area3D.new()
 	area.name = nombre
 	area.position = posicion
 	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(2.2, 1.0, 2.2)
-	shape.shape = box
+	var esfera := SphereShape3D.new()
+	esfera.radius = 2.0
+	shape.shape = esfera
 	area.add_child(shape)
-	var visual := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(2.0, 1.0, 2.0)
-	visual.mesh = mesh
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	visual.material_override = material
-	area.add_child(visual)
 	area.body_entered.connect(callback)
 	add_child(area)
 
+# Añade una luz central y cuatro luces cálidas en las esquinas del Hub para iluminar la sala interior sin usar DirectionalLight3D.
+func _agregar_luces_hub() -> void:
+	var central := OmniLight3D.new()
+	central.position = Vector3(0.0, 4.0, 0.0)
+	central.light_energy = 1.2
+	central.omni_range = 25.0
+	add_child(central)
+	for esquina in [Vector3(-7.0, 3.0, -7.0), Vector3(7.0, 3.0, -7.0), Vector3(7.0, 3.0, 7.0), Vector3(-7.0, 3.0, 7.0)]:
+		var luz := OmniLight3D.new()
+		luz.position = esquina
+		luz.light_energy = 0.6
+		luz.omni_range = 12.0
+		luz.light_color = COLOR_LUZ_ESQUINA
+		add_child(luz)
+
+# Expone el grupo de pared recta elegido para el perímetro del Hub priorizando variantes legibles de KayKit.
+func _grupo_pared() -> String:
+	return "wall"
+
+# Expone el grupo de esquina elegido para cerrar correctamente las cuatro esquinas exteriores del Hub.
+func _grupo_esquina() -> String:
+	return "wall_corner" if not AssetManager.obtener_grupo("wall_corner").is_empty() else "corner"
+
+# Expone el grupo de puerta elegido para el hueco norte del Hub priorizando doorway cuando existe en el catálogo.
+func _grupo_puerta() -> String:
+	return "doorway" if not AssetManager.obtener_grupo("doorway").is_empty() else "door"
+
+# Crea un bloque magenta visible en la coordenada faltante para que cualquier asset del Hub ausente se detecte enseguida en pruebas manuales.
+func _crear_fallback_visual(posicion: Vector3, rot_y: float) -> Node3D:
+	var mesh := CSGBox3D.new()
+	mesh.size = Vector3(2.0, 2.0, 2.0)
+	mesh.position = posicion + Vector3(0.0, 1.0, 0.0)
+	mesh.rotation.y = rot_y
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color("#FF00FF")
+	mesh.material = material
+	add_child(mesh)
+	return mesh
+
+# Construye la capa UI del Hub con panel persistente, texto guía y diálogo para volver a la dungeon desde la zona de salida.
 func _construir_overlay() -> void:
 	overlay = CanvasLayer.new()
 	add_child(overlay)
@@ -100,6 +184,7 @@ func _construir_overlay() -> void:
 	root.add_child(dialogo)
 	dialogo_salida = dialogo
 
+# Carga el estado persistente del jugador y lo ubica dentro del Hub en una coordenada despejada cercana al acceso norte.
 func _cargar_o_crear_player() -> void:
 	var estado := SaveManager.cargar_estado()
 	player = Player.new()
@@ -110,20 +195,24 @@ func _cargar_o_crear_player() -> void:
 	player.inventory_ui.visible = false
 	player._ui_recursos.visible = false
 
+# Refresca la etiqueta de oro para que el panel del Hub siempre muestre el recurso persistente actualizado del jugador.
 func _refrescar_oro() -> void:
 	if oro_label != null and player != null:
 		oro_label.text = "Oro: %s" % player.oro
 
+# Vacía el contenido dinámico del panel lateral antes de abrir otra sub-zona y reconstruir su UI contextual.
 func _limpiar_panel() -> void:
 	for child in panel_contenido.get_children():
 		panel_contenido.remove_child(child)
 		child.queue_free()
 
+# Reacciona cuando el jugador entra al área del cofre para abrir la interfaz del cofre inter-run en esa sub-zona oeste.
 func _on_zona_cofre_activada(body: Node3D) -> void:
 	if body != player:
 		return
 	_mostrar_cofre()
 
+# Construye la UI del cofre inter-run con 12 slots para gestionar items guardados entre runs desde la pared oeste del Hub.
 func _mostrar_cofre() -> void:
 	_limpiar_panel()
 	panel_titulo = Label.new()
@@ -159,6 +248,7 @@ func _mostrar_cofre() -> void:
 		vender.pressed.connect(_vender_item_cofre.bind(indice))
 		slot.add_child(vender)
 
+# Vende el item almacenado en el slot indicado, actualiza oro persistente y reconstruye la vista del cofre en la misma sub-zona.
 func _vender_item_cofre(indice: int) -> void:
 	var oro := SaveManager.vender_item_cofre(indice)
 	if oro > 0:
@@ -167,6 +257,7 @@ func _vender_item_cofre(indice: int) -> void:
 		_refrescar_oro()
 		_mostrar_cofre()
 
+# Reacciona cuando el jugador entra al taller del lado este para ofrecer mejoras a su equipamiento equipado.
 func _on_zona_taller_activada(body: Node3D) -> void:
 	if body != player:
 		return
@@ -190,6 +281,7 @@ func _on_zona_taller_activada(body: Node3D) -> void:
 		boton.pressed.connect(_mejorar_item.bind(item, costo))
 		fila.add_child(boton)
 
+# Aplica la mejora elegida al item en el taller del Hub y actualiza inmediatamente oro, estado persistente y panel activo.
 func _mejorar_item(item: Item, costo: int) -> void:
 	if item == null or player.oro < costo or item.mejoras >= 5:
 		return
@@ -203,6 +295,7 @@ func _mejorar_item(item: Item, costo: int) -> void:
 	_refrescar_oro()
 	_on_zona_taller_activada(player)
 
+# Reacciona cuando el jugador entra al bestiario del sur para desplegar la información persistente de mobs descubiertos.
 func _on_zona_bestiario_activada(body: Node3D) -> void:
 	if body != player:
 		return
@@ -223,16 +316,19 @@ func _on_zona_bestiario_activada(body: Node3D) -> void:
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		panel_contenido.add_child(label)
 
+# Reacciona cuando el jugador pisa la salida norte para mostrar el diálogo de confirmación antes de regresar a la dungeon.
 func _on_zona_salida_activada(body: Node3D) -> void:
 	if body != player:
 		return
 	dialogo_salida.popup_centered()
 
+# Guarda el estado del jugador y cambia a la escena de dungeon cuando se confirma la salida desde la puerta norte del Hub.
 func _volver_a_dungeon() -> void:
 	SaveManager.guardar_estado(player)
 	SaveManager.decrementar_runs_cofre()
 	get_tree().change_scene_to_file(DUNGEON_SCENE)
 
+# Reacciona cuando el jugador entra al libro de pasivas del suroeste para listar las pasivas descubiertas en el panel UI.
 func _on_libro_pasivas_activado(body: Node3D) -> void:
 	if body != player:
 		return
