@@ -383,11 +383,13 @@ func toggle_primera_persona() -> void:
 	if en_primera_persona:
 		_spring_arm.spring_length = 0.0
 		_camera.position = Vector3(0.0, ALTURA_OJOS, 0.0)
-		_mesh_capsula.visible = false
+		if _mesh_capsula != null:
+			_mesh_capsula.visible = false
 	else:
 		_spring_arm.spring_length = DISTANCIA_TERCERA_PERSONA
 		_camera.position = Vector3.ZERO
-		_mesh_capsula.visible = true
+		if _mesh_capsula != null:
+			_mesh_capsula.visible = true
 
 func _toggle_mouse_mode() -> void:
 	# Alterna captura del mouse para poder liberar/capturar la cámara en runtime.
@@ -477,6 +479,7 @@ func _construir_capsula_placeholder() -> void:
 	add_child(_collision_capsula)
 
 	_mesh_capsula = MeshInstance3D.new()
+	_mesh_capsula.name = "CapsulaPlaceholder"
 	var capsule_mesh := CapsuleMesh.new()
 	capsule_mesh.radius = 0.35
 	capsule_mesh.height = 1.2
